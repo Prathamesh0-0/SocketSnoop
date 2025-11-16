@@ -1,0 +1,160 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>SocketSnoop AI - Live Threat Dashboard</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <!-- Chosen Palette: Dark Cyber (BG: gray-900, Text: gray-100, Accent: blue-500, Red: red-500) -->
+    <!-- Application Structure Plan: A live, single-page dashboard. The layout is a two-column grid. The left column (80%) shows the "Live TTP Log" (the most important data). The right column (20%) shows the "Credentials Captured" list (the high-impact "wins"). This structure prioritizes the real-time TTP data, which is our core "extraordinary" feature. -->
+    <!-- Visualization & Content Choices: 1. Live TTP Log -> Goal: Inform (Real-time) -> HTML Table (JS-populated) -> Justification: Clearly shows the step-by-step TTPs as they happen. 2. Credentials Captured -> Goal: Inform (High-Impact) -> HTML List (JS-populated) -> Justification: Creates a "trophy case" of captured logins for a high-impact demo. 3. WebSocket Status -> Goal: Inform (System) -> HTML Text (JS-updated) -> Justification: Provides necessary system feedback to the dashboard user. -->
+    <!-- CONFIRMATION: NO SVG graphics used. NO Mermaid JS used. -->
+    <style>
+        body { background-color: #111827; }
+        .log-entry {
+            border-bottom: 1px solid #374151;
+            font-family: 'Courier New', Courier, monospace;
+        }
+        .log-entry-type-CAPTURE { color: #ef4444; font-weight: bold; }
+        .log-entry-type-TTP-CAPTURE { color: #eab308; }
+        .log-entry-type-AI-RESPONSE { color: #3b82f6; }
+        .log-entry-type-LURE-FTP { color: #14b8a6; }
+        .log-entry-type-LURE-TELNET { color: #a78bfa; }
+        .log-entry-type-NEW_CONN { color: #22c55e; }
+    </style>
+</head>
+<body class="text-gray-100 font-sans">
+
+    <!-- Header -->
+    <header class="bg-gray-800 shadow-md">
+        <div class="container mx-auto px-4 sm:px-6 py-4 flex justify-between items-center">
+            <h1 class="text-2xl font-bold text-blue-400">SocketSnoop AI - Live Threat Dashboard</h1>
+            <div id="status" class="flex items-center space-x-2">
+                <div id="status-light" class="w-3 h-3 rounded-full bg-red-500 animate-pulse"></div>
+                <span id="status-text" class="text-gray-300">Connecting...</span>
+            </div>
+        </div>
+    </header>
+
+    <!-- Main Content -->
+    <main class="container mx-auto px-4 sm:px-6 py-8 grid grid-cols-1 lg:grid-cols-5 gap-6">
+
+        <!-- Left Column: Live TTP Log -->
+        <div class="lg:col-span-4 bg-gray-800 p-6 rounded-lg shadow-lg">
+            <h2 class="text-xl font-bold mb-4 text-gray-200">Live TTP & Event Log</h2>
+            <div id="log-container" class="h-[70vh] overflow-y-auto bg-gray-900 rounded p-4 border border-gray-700">
+                <!-- Log entries will be prepended here -->
+                <div class="text-gray-500 log-entry py-2">Waiting for events from Honeynet Manager (ws://localhost:8765)...</div>
+            </div>
+        </div>
+
+        <!-- Right Column: Credentials Captured -->
+        <div class="lg:col-span-1 bg-gray-800 p-6 rounded-lg shadow-lg">
+            <h2 class="text-xl font-bold mb-4 text-red-400">Credentials Captured</h2>
+            <div id="capture-container" class="h-[70vh] overflow-y-auto bg-gray-900 rounded p-4 border border-gray-700">
+                <!-- Captured creds will be prepended here -->
+                <div class="text-gray-500">No credentials captured yet.</div>
+            </div>
+        </div>
+
+    </main>
+
+    <script>
+        document.addEventListener('DOMContentLoaded', () => {
+            const statusLight = document.getElementById('status-light');
+            const statusText = document.getElementById('status-text');
+            const logContainer = document.getElementById('log-container');
+            const captureContainer = document.getElementById('capture-container');
+
+            const WEBSOCKET_URI = "ws://localhost:8765";
+            let ws;
+
+            function connect() {
+                ws = new WebSocket(WEBSOCKET_URI);
+
+                ws.onopen = () => {
+                    console.log("WebSocket connection established.");
+                    statusLight.classList.remove('bg-red-500', 'animate-pulse');
+                    statusLight.classList.add('bg-green-500');
+                    statusText.textContent = "Connected";
+                };
+
+                ws.onmessage = (event) => {
+                    try {
+                        const log = JSON.parse(event.data);
+                        
+                        // 1. Create the new log entry element
+                        const logEntry = document.createElement('div');
+                        logEntry.className = `py-2 log-entry log-entry-type-${log.type.split('-')[0]}`;
+                        
+                        const timestampSpan = document.createElement('span');
+                        timestampSpan.className = "text-gray-500 mr-3";
+                        timestampSpan.textContent = log.timestamp;
+                        
+                        const typeSpan = document.createElement('span');
+                        typeSpan.className = `font-bold mr-3`;
+                        typeSpan.textContent = `[${log.type}]`;
+
+                        const dataSpan = document.createElement('span');
+                        dataSpan.className = "text-gray-200";
+                        dataSpan.textContent = log.data;
+                        
+                        logEntry.appendChild(timestampSpan);
+                        logEntry.appendChild(typeSpan);
+                        logEntry.appendChild(dataSpan);
+
+                        // Prepend to log container
+                        if (logContainer.querySelector('.text-gray-500')) {
+                             logContainer.innerHTML = ''; // Clear "Waiting for events..."
+                        }
+                        logContainer.prepend(logEntry);
+
+                        // 2. Check if it's a capture and add to "Captured" list
+                        if (log.type.startsWith('CAPTURE-')) {
+                            const captureEntry = document.createElement('div');
+                            captureEntry.className = "p-3 bg-red-900/50 border border-red-500 rounded mb-2";
+                            
+                            const captureTitle = document.createElement('div');
+                            captureTitle.className = "text-sm text-red-300";
+                            captureTitle.textContent = `[${log.type}] at ${log.timestamp}`;
+                            
+                            const captureData = document.createElement('div');
+                            captureData.className = "text-md text-white font-mono";
+                            captureData.textContent = log.data.replace('*** CAPTURE ***', '').trim();
+                            
+                            captureEntry.appendChild(captureTitle);
+                            captureEntry.appendChild(captureData);
+                            
+                            // Clear the "empty" message if it exists
+                            if (captureContainer.querySelector('.text-gray-500')) {
+                                captureContainer.innerHTML = '';
+                            }
+                            captureContainer.prepend(captureEntry);
+                        }
+
+                    } catch (e) {
+                        console.error("Error parsing log data:", e);
+                    }
+                };
+
+                ws.onclose = () => {
+                    console.log("WebSocket connection closed. Reconnecting...");
+                    statusLight.classList.add('bg-red-500', 'animate-pulse');
+                    statusLight.classList.remove('bg-green-500');
+                    statusText.textContent = "Reconnecting...";
+                    // Try to reconnect every 3 seconds
+                    setTimeout(connect, 3000);
+                };
+
+                ws.onerror = (err) => {
+                    console.error("WebSocket error:", err);
+                    ws.close();
+                };
+            }
+
+            // Initial connection attempt
+            connect();
+        });
+    </script>
+</body>
+</html>
